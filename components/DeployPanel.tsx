@@ -386,7 +386,7 @@ export function DeployPanel() {
               {starLink(initResult.hash)} - ledger {initResult.ledger ?? "-"}
             </span>
           ) : (
-            <span className="tiny mono">{initResult.detail}</span>
+            <span className="tiny mono">{initResult.kind === "exported" ? "Exported" : initResult.detail}</span>
           )}
         </div>
       )}

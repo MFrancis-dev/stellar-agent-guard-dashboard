@@ -79,6 +79,12 @@ export type InvokeResult =
       /** Total fee paid, in stroops (inclusion fee + resource fee). */
       feeStroops?: string;
       diagnosticEvents: unknown[];
+    }
+  | {
+      /** An unsigned transaction XDR was successfully exported for external tools. */
+      kind: "exported";
+      xdr: string;
+      detail?: string;
     };
 
 export interface InvokeRequest {
@@ -88,6 +94,7 @@ export interface InvokeRequest {
   args: xdr.ScVal[];
   signer: WalletSigner;
   passphrase?: string;
+  exportOnly?: boolean;
   /**
    * A smart account whose own storage must be merged into the footprint. Only
    * needed when the call is authorized *by* the guard (its `__check_auth` reads
@@ -511,10 +518,14 @@ async function runInvocation(request: InvokeRequest): Promise<InvokeResult> {
     passphrase,
     guard: request.guardForFootprint ?? null,
   });
-  // Publish the hash the operator must verify on the Ledger screen. This is the
-  // exact payload the envelope signature covers — the same bytes the device shows
-  // — so the guide's big monospace value is comparable digit-for-digit.
-  hardwareGuide.setTxHash(bytesToHex(assembled.transaction.hash() as unknown as Uint8Array));
+
+  if (request.exportOnly) {
+    return {
+      kind: "exported",
+      xdr: assembled.transaction.toXDR()
+    };
+  }
+
   promptWallet();
   const signedEnvelope = await signer.signTransaction(assembled.transaction.toXDR());
   const transaction = TransactionBuilder.fromXDR(signedEnvelope, passphrase) as Transaction;
@@ -596,17 +607,10 @@ async function runInvocation(request: InvokeRequest): Promise<InvokeResult> {
  * not recorded: a refusal never had a transaction to record.
  */
 export async function invokeWithWallet(request: InvokeRequest): Promise<InvokeResult> {
-  // Open the hardware-wallet guide for the duration of signing. It is cleared in
-  // `finally`, so it auto-dismisses on confirmation *and* on every failure path —
-  // a guide left up after a refused call would be a lie by omission.
-  hardwareGuide.begin(request.contract, request.fn);
-  let result: InvokeResult;
-  try {
-    result = await runInvocation(request);
-  } finally {
-    hardwareGuide.clear();
-  }
-  if (result.kind === "refused") {
+  const result = await runInvocation(request);
+  if (result.kind === "exported") {
+    announce("Transaction XDR exported for offline signing");
+  } else if (result.kind === "refused") {
     announce("Transaction refused — nothing was broadcast");
   } else if (result.kind === "failed") {
     recordTx({
@@ -616,7 +620,7 @@ export async function invokeWithWallet(request: InvokeRequest): Promise<InvokeRe
       feeStroops: result.feeStroops ?? null,
     });
     announce("Transaction failed on chain");
-  } else {
+  } else if (result.kind === "submitted") {
     recordTx({
       hash: result.hash,
       operation: request.fn,

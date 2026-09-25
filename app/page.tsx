@@ -1,3 +1,4 @@
+import { SubmitSignedXDRPanel } from "../components/SubmitSignedXDRPanel.tsx";
 import { GuardProvider } from "../components/GuardProvider.tsx";
 import { WalletBar } from "../components/WalletBar.tsx";
 import { StatusPanel } from "../components/StatusPanel.tsx";
@@ -16,6 +17,7 @@ export default function ConsolePage() {
       <TxHistoryTable />
       <PanicPanel />
       <TelemetryFeed />
+      <SubmitSignedXDRPanel />
       <ScopeNotice compact />
     </GuardProvider>
   );
