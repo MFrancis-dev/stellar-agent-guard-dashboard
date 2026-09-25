@@ -24,10 +24,11 @@ import {
   xdr,
 } from "@stellar/stellar-sdk";
 import { NETWORK } from "./network.ts";
-import { guardStorageLedgerKeys, ledgerKeyId } from "./scval.ts";
+import { bytesToHex, guardStorageLedgerKeys, ledgerKeyId } from "./scval.ts";
 import { stringifyError } from "./chain.ts";
 import { announce } from "./useAnnounce.ts";
 import { recordTx } from "./txHistory.ts";
+import { hardwareGuide } from "./hardwareGuide.ts";
 
 /** Inclusion fee floor, in stroops, for a single-operation transaction. */
 export const INCLUSION_FEE = "100";
@@ -510,6 +511,10 @@ async function runInvocation(request: InvokeRequest): Promise<InvokeResult> {
     passphrase,
     guard: request.guardForFootprint ?? null,
   });
+  // Publish the hash the operator must verify on the Ledger screen. This is the
+  // exact payload the envelope signature covers — the same bytes the device shows
+  // — so the guide's big monospace value is comparable digit-for-digit.
+  hardwareGuide.setTxHash(bytesToHex(assembled.transaction.hash() as unknown as Uint8Array));
   promptWallet();
   const signedEnvelope = await signer.signTransaction(assembled.transaction.toXDR());
   const transaction = TransactionBuilder.fromXDR(signedEnvelope, passphrase) as Transaction;
@@ -591,7 +596,16 @@ async function runInvocation(request: InvokeRequest): Promise<InvokeResult> {
  * not recorded: a refusal never had a transaction to record.
  */
 export async function invokeWithWallet(request: InvokeRequest): Promise<InvokeResult> {
-  const result = await runInvocation(request);
+  // Open the hardware-wallet guide for the duration of signing. It is cleared in
+  // `finally`, so it auto-dismisses on confirmation *and* on every failure path —
+  // a guide left up after a refused call would be a lie by omission.
+  hardwareGuide.begin(request.contract, request.fn);
+  let result: InvokeResult;
+  try {
+    result = await runInvocation(request);
+  } finally {
+    hardwareGuide.clear();
+  }
   if (result.kind === "refused") {
     announce("Transaction refused — nothing was broadcast");
   } else if (result.kind === "failed") {
